@@ -200,6 +200,7 @@ export const MultiSelectBox = () => {
 									alt={character.name}
 									width={32}
 									height={32}
+									quality={50}
 									className='rounded-lg'
 								/>
 								<div className='ml-2'>
