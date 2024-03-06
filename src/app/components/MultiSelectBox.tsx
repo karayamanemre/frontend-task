@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Character, CharactersResponse } from "./types";
 import Image from "next/image";
 import { X, ChevronDown } from "lucide-react";
@@ -10,46 +10,11 @@ export const MultiSelectBox = () => {
 	const [selectedCharacters, setSelectedCharacters] = useState<Character[]>([]);
 	const [isDropdownVisible, setIsDropdownVisible] = useState(false);
 	const [loading, setLoading] = useState(false);
-
+	const [nextPageUrl, setNextPageUrl] = useState<string | null>(null);
+	const [isFetchingNextPage, setIsFetchingNextPage] = useState(false);
+	const [prevScrollPosition, setPrevScrollPosition] = useState(0);
+	const listRef = useRef<HTMLUListElement>(null);
 	const wrapperRef = useRef(null);
-
-	const toggleDropdown = () => {
-		setIsDropdownVisible(!isDropdownVisible);
-	};
-
-	const fetchCharacters = async (searchTerm = "") => {
-		setLoading(true);
-
-		try {
-			const query = searchTerm ? `?name=${searchTerm}` : "";
-			const response = await fetch(
-				`https://rickandmortyapi.com/api/character/${query}`
-			);
-			const data: CharactersResponse = await response.json();
-			if (data && data.results) {
-				setCharacters(data.results);
-			} else {
-				setCharacters([]);
-			}
-		} catch (error) {
-			console.error("An error occurred while fetching characters:", error);
-			setCharacters([]);
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	useEffect(() => {
-		fetchCharacters();
-	}, []);
-
-	useEffect(() => {
-		const handler = setTimeout(() => {
-			fetchCharacters(searchTerm);
-		}, 300);
-
-		return () => clearTimeout(handler);
-	}, [searchTerm]);
 
 	const handleSelectCharacter = (character: Character) => {
 		const isSelected = selectedCharacters.some((c) => c.id === character.id);
@@ -68,6 +33,82 @@ export const MultiSelectBox = () => {
 			selectedCharacters.filter((c) => c.id !== character.id)
 		);
 	};
+
+	useEffect(() => {
+		if (listRef.current) {
+			listRef.current.scrollTop = prevScrollPosition;
+		}
+	}, [characters, prevScrollPosition]);
+
+	const toggleDropdown = () => setIsDropdownVisible((v) => !v);
+
+	const fetchCharacters = useCallback(
+		async (searchTerm: string = "", nextPage: string = "") => {
+			setLoading(true);
+			const url =
+				nextPage ||
+				`https://rickandmortyapi.com/api/character/${
+					searchTerm ? "?name=" + searchTerm : ""
+				}`;
+
+			try {
+				const response = await fetch(url);
+				const data: CharactersResponse = await response.json();
+				if (data && Array.isArray(data.results)) {
+					setCharacters((prev) =>
+						nextPage ? [...prev, ...data.results] : data.results
+					);
+					setNextPageUrl(data.info.next);
+				} else {
+					setCharacters([]);
+					setNextPageUrl(null);
+				}
+			} catch (error) {
+				console.error("Failed to fetch characters:", error);
+				setCharacters([]);
+				setNextPageUrl(null);
+			} finally {
+				setLoading(false);
+				setIsFetchingNextPage(false);
+			}
+		},
+		[]
+	);
+
+	useEffect(() => {
+		fetchCharacters(searchTerm);
+	}, [searchTerm, fetchCharacters]);
+
+	useEffect(() => {
+		if (isFetchingNextPage && nextPageUrl) {
+			fetchCharacters(searchTerm, nextPageUrl).then(() => {
+				if (listRef.current) {
+					listRef.current.scrollTop = prevScrollPosition;
+				}
+			});
+		}
+	}, [
+		isFetchingNextPage,
+		nextPageUrl,
+		searchTerm,
+		fetchCharacters,
+		prevScrollPosition,
+	]);
+
+	const handleScroll = useCallback(
+		(e: React.UIEvent<HTMLUListElement>) => {
+			const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+			if (
+				scrollHeight - scrollTop <= clientHeight + 100 &&
+				nextPageUrl &&
+				!loading
+			) {
+				setPrevScrollPosition(scrollTop);
+				setIsFetchingNextPage(true);
+			}
+		},
+		[loading, nextPageUrl, setIsFetchingNextPage]
+	);
 
 	const handleClickOutside = (event: MouseEvent) => {
 		if (
@@ -132,15 +173,18 @@ export const MultiSelectBox = () => {
 				</button>
 			</div>
 			{isDropdownVisible && (
-				<ul className='absolute w-[320px] md:w-[500px] bg-white border rounded-xl border-[#95A4B8] max-h-[400px] overflow-auto z-10 scrollbar scrollbar-thumb-[#9BA3AF] scrollbar-track-transparent'>
+				<ul
+					ref={listRef}
+					onScroll={handleScroll}
+					className='absolute w-[320px] md:w-[500px] bg-white border rounded-xl border-[#95A4B8] max-h-[400px] overflow-auto z-10 scrollbar scrollbar-thumb-[#9BA3AF] scrollbar-track-transparent'>
 					{loading ? (
 						<div className='flex justify-center items-center p-2'>
 							<div className='loader 	rounded-full border-4 border-t-4 border-gray-200 h-8 w-8'></div>
 						</div>
 					) : characters.length > 0 ? (
-						characters.map((character) => (
+						characters.map((character, index) => (
 							<li
-								key={character.id}
+								key={`${character.id}-${index}`}
 								onClick={() => handleSelectCharacter(character)}
 								className='p-2 hover:bg-gray-100 cursor-pointer flex items-center border-b border-[#95A4B8]'>
 								<input
